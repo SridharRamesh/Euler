@@ -4,7 +4,8 @@
   MultiParamTypeClasses,
   TypeSynonymInstances,
   FlexibleInstances,
-  FlexibleContexts
+  FlexibleContexts,
+  AllowAmbiguousTypes
   #-}
 
 import Prelude hiding (length, replicate, take)
@@ -71,6 +72,8 @@ boundedFallingPartitions n bound
 -- All ways to write n as a sum of a sequence of positive integers, each ≤ the previous
 fallingPartitions n = boundedFallingPartitions n n
 
+fallingPartitionsWithAtLeastOneOne n = map (++[1]) (fallingPartitions (n - 1))
+
 lookupMultiplicity partMultiplicities part = fromMaybe 0 (lookup part partMultiplicities)
 
 divisorsPrimePower :: (Integer, Integer) -> [Integer]
@@ -83,9 +86,13 @@ divisors = memoize (\n -> map product $ sequence $ map divisorsPrimePower $ prim
 expandMultiplicities multiplicities = concat [replicate multiplicity value | (value, multiplicity) <- multiplicities]
 
 boundedColoredPartitions = memoFix2 (\recurse fallingTileSizes n -> 
-  if n < 0 then 0
-  else if n == 0 then 1
-  else sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
+  if n < 0 then  {-# SCC "negative" #-} 0
+  else if n == 0 then  {-# SCC "1" #-} 1
+  else if n < 10 then {-# SCC "under10" #-} sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
+  else if n < 50 then {-# SCC "under50" #-} sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
+  else if n < 500 then {-# SCC "under500" #-} sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
+  else if n < 1000 then {-# SCC "under1000" #-} sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
+  else {-# SCC "Over1000" #-} sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
   )
 
 -- The number of ways to choose bars + 1 distinguishable natural numbers which sum to stars, is the same as the number 
@@ -115,9 +122,16 @@ coloredPartitions3 :: [(Integer, Integer)] -> Integer -> Integer
 coloredPartitions3 multiplicities = memoize (\n -> boundedColoredPartitions2 (reverse multiplicities) n)
 
 coloredPartitions2 :: [(Integer, Integer)] -> Integer -> Integer
-coloredPartitions2 multiplicities =
-  let fallingTileSizes = expandMultiplicities (reverse multiplicities)
-  in memoize (\n -> boundedColoredPartitions fallingTileSizes n)
+coloredPartitions2 fallingMultiplicities =
+  let risingTileSizes = expandMultiplicities (reverse fallingMultiplicities)
+  in memoize (\n -> boundedColoredPartitions risingTileSizes n)
+
+{-
+coloredPartitions4 :: [(Integer, Integer)] -> Integer -> Integer
+coloredPartitions4 multiplicities =
+  let risingTileSizes = expandMultiplicities multiplicities
+  in memoize (\n -> boundedColoredPartitions risingTileSizes n)
+-}
 
 coloredPartitions1 :: [(Integer, Integer)] -> Integer -> Integer
 coloredPartitions1 (lookupMultiplicity -> multiplicityFunc) = 
@@ -129,7 +143,9 @@ coloredPartitions1 (lookupMultiplicity -> multiplicityFunc) =
      else (gamma n + sum [(gamma k) * (recurse (n - k)) | k <- [1..n-1]]) `div` n
     )
 
-coloredPartitions = coloredPartitions2 -- Empirically, this is better than coloredPartitions1 or coloredPartitions3
+coloredPartitions beta 1 = fromMaybe 0 (lookup 1 beta)
+coloredPartitions beta n = coloredPartitions2 beta n -- Empirically, this is better than coloredPartitions1 or coloredPartitions3
+-- Test: coloredPartitions [(2, 1), (3, 1), (5, 1), (7, 2)] 1000 = 29727907
 
 theta partMultiplicities = sum [(1 + i) * multiplicity | (i, multiplicity) <- partMultiplicities]
 parityTheta partMultiplicities = case (theta partMultiplicities `mod` 2) of 
@@ -143,7 +159,7 @@ reciprocalH partMultiplicities = product [i^multiplicity * (factorial multiplici
 
 vectorPartitions k vector = 
   sum [parityTheta beta (vectorPartitionsDuplicatePattern beta vector)
-        | alpha <- fallingPartitions k, let beta = multiplicityCompress alpha
+        | alpha <- fallingPartitionsWithAtLeastOneOne k, let beta = multiplicityCompress alpha
       ]
 
 class Divide a b where 
@@ -155,8 +171,11 @@ instance Divide Integer Modular where
 instance Divide Integer Fraction where
   divide m n = (fromIntegral m) % (fromIntegral n)
 
-vectorPartitionsDuplicatePattern beta vector = 
-  product [coloredPartitions beta component | component <- vector] `divide` (reciprocalH beta)
+vectorPartitionsDuplicatePattern :: Divide Integer b => [(Integer, Integer)] -> [Integer] -> b
+vectorPartitionsDuplicatePattern beta vector =
+  let numerator = product [coloredPartitions beta component | component <- vector]
+      denominator = reciprocalH beta
+  in numerator `divide` denominator
 
 -- The number of ways in which n can be written as the product of k distinct positive integers
 w n k = vectorPartitions k (map snd $ primeAndExponentFactorization n)
@@ -191,6 +210,6 @@ instance Fractional Modular where
 genericAnswer :: Integer -> Integer -> Modular
 genericAnswer n k = vectorPartitions k (map snd (factorialPrimeAndExponentFactorization n))
 
-answer = genericAnswer 1000 30
+answer = genericAnswer 100 30
 
-main = putStrLn $ show answer
+main2 = putStrLn $ show answer

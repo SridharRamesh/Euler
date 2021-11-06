@@ -5,10 +5,12 @@
   TypeSynonymInstances,
   FlexibleInstances,
   FlexibleContexts,
-  AllowAmbiguousTypes
+  AllowAmbiguousTypes,
+  ScopedTypeVariables
   #-}
 
-import Prelude hiding (length, replicate, take)
+import Prelude hiding (length, replicate, take, Integer, fromInteger)
+import qualified Prelude as Prelude
 import Data.List hiding (length, replicate, take)
 import Data.Ratio
 import Data.Function.Memoize
@@ -26,10 +28,13 @@ take = genericTake
 
 index = genericIndex
 
+type Integer = Int
 type Natural = Integer
 type PositiveInteger = Natural
 type Prime = PositiveInteger
 type Fraction = Ratio Natural
+
+fromInteger = Prelude.fromInteger . toInteger
 
 primes = 2 : filter isPrime [3..]
 
@@ -97,6 +102,16 @@ boundedColoredPartitions = memoFix2 (\recurse fallingTileSizes n ->
   else {-# SCC "Over1000" #-} sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
   )
 
+boundedColoredPartitions3 :: Num n => [Integer] -> Integer -> n
+boundedColoredPartitions3 [] = (\n -> if n == 0 then 1 else 0)
+boundedColoredPartitions3 (tileSize:remainingTileSizes) = 
+  let otherTilesRecurse = boundedColoredPartitions3 remainingTileSizes in 
+  memoFix (\meRecurse n ->
+    if n < 0 then 0
+    else if n == 0 then 1
+    else (otherTilesRecurse n) + (meRecurse (n - tileSize))
+  )
+
 -- The number of ways to choose bars + 1 distinguishable natural numbers which sum to stars, is the same as the number 
 -- of ways to arrange stars and bars, which is (stars + bars) choose (stars; bars)
 starsAndBars stars bars = 
@@ -105,7 +120,8 @@ starsAndBars stars bars =
       denominator = factorial j
   in numerator `div` denominator
 
-boundedColoredPartitions2 :: [(Integer, Integer)] -> Integer -> Integer
+{-
+boundedColoredPartitions2 :: Num n => [(Integer, Integer)] -> Integer -> n
 boundedColoredPartitions2 = memoFix2 (\recurse tileMultiplicities n -> 
   if n < 0 then 0
   else if n == 0 then 1
@@ -122,8 +138,9 @@ boundedColoredPartitions2 = memoFix2 (\recurse tileMultiplicities n ->
 
 coloredPartitions3 :: [(Integer, Integer)] -> Integer -> Integer
 coloredPartitions3 multiplicities = memoize (\n -> boundedColoredPartitions2 (reverse multiplicities) n)
+-}
 
-coloredPartitions2 :: [(Integer, Integer)] -> Integer -> Integer
+coloredPartitions2 :: Num n => [(Integer, Integer)] -> Integer -> n
 coloredPartitions2 fallingMultiplicities =
   let risingTileSizes = expandMultiplicities (reverse fallingMultiplicities)
   in memoize (\n -> boundedColoredPartitions risingTileSizes n)
@@ -135,6 +152,7 @@ coloredPartitions4 multiplicities =
   in memoize (\n -> boundedColoredPartitions risingTileSizes n)
 -}
 
+{-
 coloredPartitions1 :: [(Integer, Integer)] -> Integer -> Integer
 coloredPartitions1 (lookupMultiplicity -> multiplicityFunc) = 
   let gamma = memoize (\n -> sum [divisor * (multiplicityFunc divisor) | divisor <- divisors n])
@@ -144,37 +162,40 @@ coloredPartitions1 (lookupMultiplicity -> multiplicityFunc) =
      then multiplicityFunc 1
      else (gamma n + sum [(gamma k) * (recurse (n - k)) | k <- [1..n-1]]) `div` n
     )
+-}
 
 generalExp mult one base 0 = one
 generalExp mult one base n | even n = mult x x where x = generalExp mult one base (n `div` 2)
 generalExp mult one base n | odd n = mult base (generalExp mult one base (n - 1))
 
 -- We assume here that modulus is monic (i.e., has highest-degree coefficient one)
+polyMod :: (Eq n, Num n) => (VPoly n) -> (VPoly n) -> (VPoly n)
 polyMod p modulus = case (leading p, leading modulus) of
   (Just (pDegree, pLeadingCoefficient), Just(mDegree, _)) -> 
     if pDegree >= mDegree
-    then polyMod (p - scale (pDegree - mDegree) pLeadingCoefficient modulus) modulus
+    then polyMod (p - scale (fromIntegral (pDegree - mDegree)) pLeadingCoefficient modulus) modulus
     else p
   _ -> p
 modMultPoly modulus a b = (a * b) `polyMod` modulus
 
 flipPoly = toPoly . (Vector.reverse) . unPoly
 
-coeff :: Integer -> VPoly Integer -> Integer
+coeff :: (Eq n, Num n) => Integer -> VPoly n -> n
 coeff d p = fromMaybe 0 $ (Vector.!?) (unPoly p) (fromIntegral d)
 
 -- We assume for now that the polynomial to be inverted has lowest-order term 1
-invertPoly :: (VPoly Integer) -> Integer -> Integer
+invertPoly :: (Eq n, Num n) => (VPoly n) -> Integer -> n
 invertPoly p n =
   case (leading p) of
     (Just (fromIntegral -> pDegree, _)) -> coeff (pDegree - 1) $ generalExp (modMultPoly (flipPoly p)) 1 X (n + pDegree - 1)
     Nothing -> error "Tried to invert zero polynomial!"
 
-coloredPartitions5 :: [(Integer, Integer)] -> Integer -> Integer
+coloredPartitions5 :: (Eq n, Num n) => [(Integer, Integer)] -> Integer -> n
 coloredPartitions5 = memoize2 (\m -> invertPoly $ product [(1 - X^a)^b | (a, b) <- m])
 
-coloredPartitions beta 1 = fromMaybe 0 (lookup 1 beta)
-coloredPartitions beta n = coloredPartitions5 beta n -- Empirically, coloredPartitions2 is better than coloredPartitions1 or coloredPartitions3
+coloredPartitions :: Num n => [(Integer, Integer)] -> Integer -> n
+coloredPartitions beta 1 = fromInteger $ fromMaybe 0 (lookup 1 beta)
+coloredPartitions beta n = coloredPartitions2 beta n -- Empirically, coloredPartitions2 is better than coloredPartitions1 or coloredPartitions3
 -- Test: coloredPartitions [(2, 1), (3, 1), (5, 1), (7, 2)] 1000 = 29727907
 
 theta partMultiplicities = sum [(1 + i) * multiplicity | (i, multiplicity) <- partMultiplicities]
@@ -182,10 +203,13 @@ parityTheta partMultiplicities = case (theta partMultiplicities `mod` 2) of
   0 -> id
   1 -> negate
 
-factorials = scanl (*) 1 [1..]
+factorials = scanl (*) 1 (iterate (+1) 1)
+
+factorial :: Num n => Integer -> n
 factorial n = factorials `index` n
 
-reciprocalH partMultiplicities = product [i^multiplicity * (factorial multiplicity) | (i, multiplicity) <- partMultiplicities]
+reciprocalH :: Num n => [(Integer, Integer)] -> n
+reciprocalH partMultiplicities = product [(fromInteger i)^multiplicity * (factorial multiplicity) | (i, multiplicity) <- partMultiplicities]
 
 vectorPartitions k vector = 
   sum [parityTheta beta (vectorPartitionsDuplicatePattern beta vector)
@@ -210,10 +234,13 @@ instance Divide Integer Modular where
 instance Divide Integer Fraction where
   divide m n = (fromIntegral m) % (fromIntegral n)
 
-vectorPartitionsDuplicatePattern :: Divide Integer b => [(Integer, Integer)] -> [Integer] -> b
+instance Divide Modular Modular where
+  divide m n = m / n
+
+vectorPartitionsDuplicatePattern :: Divide Modular b => [(Integer, Integer)] -> [Integer] -> b
 vectorPartitionsDuplicatePattern beta vector =
-  let numerator = product [coloredPartitions beta component | component <- vector]
-      denominator = reciprocalH beta
+  let numerator :: Modular = product [coloredPartitions beta component | component <- vector]
+      denominator :: Modular = reciprocalH beta
   in numerator `divide` denominator
 
 -- The number of ways in which n can be written as the product of k distinct positive integers

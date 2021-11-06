@@ -18,6 +18,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Data.Poly
 import qualified Data.Vector.Generic as Vector
+import Control.Monad(when)
 
 default ()
 
@@ -29,12 +30,12 @@ take = genericTake
 index = genericIndex
 
 type Integer = Int
+fromInteger = Prelude.fromInteger . toInteger
+
 type Natural = Integer
 type PositiveInteger = Natural
 type Prime = PositiveInteger
 type Fraction = Ratio Natural
-
-fromInteger = Prelude.fromInteger . toInteger
 
 primes = 2 : filter isPrime [3..]
 
@@ -93,13 +94,9 @@ divisors = memoize (\n -> map product $ sequence $ map divisorsPrimePower $ prim
 expandMultiplicities multiplicities = concat [replicate multiplicity value | (value, multiplicity) <- multiplicities]
 
 boundedColoredPartitions = memoFix2 (\recurse fallingTileSizes n -> 
-  if n < 0 then  {-# SCC "negative" #-} 0
-  else if n == 0 then  {-# SCC "1" #-} 1
-  else if n < 10 then {-# SCC "under10" #-} sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
-  else if n < 50 then {-# SCC "under50" #-} sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
-  else if n < 500 then {-# SCC "under500" #-} sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
-  else if n < 1000 then {-# SCC "under1000" #-} sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
-  else {-# SCC "Over1000" #-} sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
+  if n < 0 then 0
+  else if n == 0 then 1
+  else sum [(recurse cut (n - tileSize)) | cut <- tails fallingTileSizes, not (null cut), let tileSize = head cut]
   )
 
 boundedColoredPartitions3 :: Num n => [Integer] -> Integer -> n
@@ -164,9 +161,11 @@ coloredPartitions1 (lookupMultiplicity -> multiplicityFunc) =
     )
 -}
 
-generalExp mult one base 0 = one
-generalExp mult one base n | even n = mult x x where x = generalExp mult one base (n `div` 2)
-generalExp mult one base n | odd n = mult base (generalExp mult one base (n - 1))
+generalExp mult one base = memoFix (\recurse n -> 
+  if n == 0 then one
+  else if even n then let x = recurse (n `div` 2) in mult x x
+  else mult base (recurse (n - 1))
+  )
 
 -- We assume here that modulus is monic (i.e., has highest-degree coefficient one)
 polyMod :: (Eq n, Num n) => (VPoly n) -> (VPoly n) -> (VPoly n)
@@ -186,18 +185,21 @@ coeff d p = fromMaybe 0 $ (Vector.!?) (unPoly p) (fromIntegral d)
 -- We assume for now that the polynomial to be inverted has lowest-order term 1
 invertPoly :: (Eq n, Num n) => (VPoly n) -> Integer -> n
 invertPoly p n =
-  case (leading p) of
-    (Just (fromIntegral -> pDegree, _)) -> coeff (pDegree - 1) $ generalExp (modMultPoly (flipPoly p)) 1 X (n + pDegree - 1)
-    Nothing -> error "Tried to invert zero polynomial!"
+  let powersOfX = generalExp (modMultPoly (flipPoly p)) 1 X
+      Just (fromIntegral -> pDegree, _) = leading p -- We crash here if p is zero
+  in coeff (pDegree - 1) $ powersOfX (n + pDegree - 1)
 
 coloredPartitions5 :: (Eq n, Num n) => [(Integer, Integer)] -> Integer -> n
-coloredPartitions5 = memoize2 (\m -> invertPoly $ product [(1 - X^a)^b | (a, b) <- m])
+coloredPartitions5 = (\m -> invertPoly $ product [(1 - X^a)^b | (a, b) <- m])
 
-coloredPartitions :: Num n => [(Integer, Integer)] -> Integer -> n
+coloredPartitions :: (Eq n, Num n) => [(Integer, Integer)] -> Integer -> n
 coloredPartitions beta 1 = fromInteger $ fromMaybe 0 (lookup 1 beta)
-coloredPartitions beta n = coloredPartitions2 beta n -- Empirically, coloredPartitions2 is better than coloredPartitions1 or coloredPartitions3
+coloredPartitions beta n = coloredPartitions5 beta n -- Empirically, coloredPartitions2 is better than coloredPartitions1 or coloredPartitions3. coloredPartitions5 is exponentially better than everything, in theory, and remains blazingly fast in practice.
 -- Test: coloredPartitions [(2, 1), (3, 1), (5, 1), (7, 2)] 1000 = 29727907
 
+-- Note that the sum of i * multiplicity is just the number we took a partition of, and the sum of 
+-- 1 * multiplicity is just the length of the uncompressed partition. So we're just checking to see
+-- if those two have the same parity or not.
 theta partMultiplicities = sum [(1 + i) * multiplicity | (i, multiplicity) <- partMultiplicities]
 parityTheta partMultiplicities = case (theta partMultiplicities `mod` 2) of 
   0 -> id
@@ -253,16 +255,23 @@ legendre n p | n < p = 0
 -- Returns primeAndExponentFactorization (n!), quickly using Legendre's theorem
 factorialPrimeAndExponentFactorization n = [(p, legendre n p) | p <- takeWhile (<= n) primes]
 
+-- We presume all modular values are stored at all times in normalized form.
+-- That is, the integer is always in the range [0, modulus)
 newtype Modular = Modular Integer deriving Show
 modulus = 1000000007 :: Integer -- Note that this is a prime modulus!
 checkPrimeModulus = isPrime modulus
 toModular a = Modular (a `mod` modulus)
 
+instance Eq Modular where
+  (Modular a) == (Modular b) = a == b -- We presume all modular values are stored at all times in normalized form.
+
 instance Num Modular where
   fromInteger n = toModular (fromIntegral n)
-  (Modular a) + (Modular b) = toModular (a + b)
-  (Modular a) * (Modular b) = toModular (a * b)
-  negate (Modular a) = toModular (negate a)
+  (Modular a) + (Modular b) = let sum = a + b in Modular $ if sum >= modulus then sum - modulus else sum
+  (Modular a) * (Modular b) = Modular ((a * b) `mod` modulus)
+  negate (Modular a) = Modular (modulus - a)
+  signum _ = error "We do not define signum"
+  abs _ = error "We do not define abs"
 
 inverse :: Integral a => a -> a -> a
 inverse q 1 = 1
@@ -271,6 +280,7 @@ inverse q p = (n * q + 1) `div` p
 
 instance Fractional Modular where
   recip (Modular a) = if not checkPrimeModulus then error "Non prime modulus!" else (Modular (inverse modulus a))
+  fromRational _ = error "We do not define fromRational"
 
 -- Returns w (n!) k modulo the fixed modulus.
 genericAnswer :: Integer -> Integer -> Modular

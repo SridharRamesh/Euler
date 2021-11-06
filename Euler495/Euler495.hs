@@ -15,7 +15,7 @@ import Data.Function.Memoize
 import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Data.Poly
-import Data.Vector.Generic((!?))
+import qualified Data.Vector.Generic as Vector
 
 default ()
 
@@ -145,22 +145,36 @@ coloredPartitions1 (lookupMultiplicity -> multiplicityFunc) =
      else (gamma n + sum [(gamma k) * (recurse (n - k)) | k <- [1..n-1]]) `div` n
     )
 
+generalExp mult one base 0 = one
+generalExp mult one base n | even n = mult x x where x = generalExp mult one base (n `div` 2)
+generalExp mult one base n | odd n = mult base (generalExp mult one base (n - 1))
+
+-- We assume here that modulus is monic (i.e., has highest-degree coefficient one)
+polyMod p modulus = case (leading p, leading modulus) of
+  (Just (pDegree, pLeadingCoefficient), Just(mDegree, _)) -> 
+    if pDegree >= mDegree
+    then polyMod (p - scale (pDegree - mDegree) pLeadingCoefficient modulus) modulus
+    else p
+  _ -> p
+modMultPoly modulus a b = (a * b) `polyMod` modulus
+
+flipPoly = toPoly . (Vector.reverse) . unPoly
+
+coeff :: Integer -> VPoly Integer -> Integer
+coeff d p = fromMaybe 0 $ (Vector.!?) (unPoly p) (fromIntegral d)
+
 -- We assume for now that the polynomial to be inverted has lowest-order term 1
 invertPoly :: (VPoly Integer) -> Integer -> Integer
-invertPoly p =
-  let coeff d = fromMaybe 0 $ (unPoly p) !? (fromIntegral d)
-  in
-    memoFix (\recurse n -> 
-    if n == 0
-    then 1
-    else - sum [(recurse k) * (coeff (n - k)) | k <- [0..n-1]]
-    )
+invertPoly p n =
+  case (leading p) of
+    (Just (fromIntegral -> pDegree, _)) -> coeff (pDegree - 1) $ generalExp (modMultPoly (flipPoly p)) 1 X (n + pDegree - 1)
+    Nothing -> error "Tried to invert zero polynomial!"
 
 coloredPartitions5 :: [(Integer, Integer)] -> Integer -> Integer
-coloredPartitions5 m = invertPoly $ product [(1 - X^a)^b | (a, b) <- m]
+coloredPartitions5 = memoize2 (\m -> invertPoly $ product [(1 - X^a)^b | (a, b) <- m])
 
 coloredPartitions beta 1 = fromMaybe 0 (lookup 1 beta)
-coloredPartitions beta n = coloredPartitions2 beta n -- Empirically, this is better than coloredPartitions1 or coloredPartitions3
+coloredPartitions beta n = coloredPartitions5 beta n -- Empirically, coloredPartitions2 is better than coloredPartitions1 or coloredPartitions3
 -- Test: coloredPartitions [(2, 1), (3, 1), (5, 1), (7, 2)] 1000 = 29727907
 
 theta partMultiplicities = sum [(1 + i) * multiplicity | (i, multiplicity) <- partMultiplicities]
@@ -177,6 +191,15 @@ vectorPartitions k vector =
   sum [parityTheta beta (vectorPartitionsDuplicatePattern beta vector)
         | alpha <- fallingPartitionsWithAtLeastOneOne k, let beta = multiplicityCompress alpha
       ]
+
+vectorPartitionsStreaming k vector = 
+  let baseList = fallingPartitionsWithAtLeastOneOne k
+      baseLength = length baseList
+      listToSum = [parityTheta beta (vectorPartitionsDuplicatePattern beta vector)
+        | alpha <- baseList, let beta = multiplicityCompress alpha
+        ]
+      streamingSums = scanl (+) (0) listToSum
+  in zipWith (\a b -> (a, baseLength, b)) [0..] streamingSums
 
 class Divide a b where 
   divide :: a -> a -> b
@@ -226,6 +249,9 @@ instance Fractional Modular where
 genericAnswer :: Integer -> Integer -> Modular
 genericAnswer n k = vectorPartitions k (map snd (factorialPrimeAndExponentFactorization n))
 
-answer = genericAnswer 100 30
+genericAnswerStreaming :: Integer -> Integer -> [(Integer, Integer, Modular)]
+genericAnswerStreaming n k = vectorPartitionsStreaming k (map snd (factorialPrimeAndExponentFactorization n))
 
-main2 = putStrLn $ show answer
+answer = genericAnswerStreaming 10000 30
+
+main = mapM_ (\(a, b, c) -> putStrLn $ (show a) ++ " out of " ++ (show b) ++ " has result " ++ (show c)) answer

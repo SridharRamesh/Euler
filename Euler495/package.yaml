@@ -14,6 +14,7 @@ executables:
     - -threaded
     - -rtsopts
     - -with-rtsopts=-N
+    - -O2
     when:        
     - condition: false        
       other-modules: Paths_Euler495

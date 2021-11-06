@@ -14,6 +14,8 @@ import Data.Ratio
 import Data.Function.Memoize
 import qualified Data.Map.Strict as Map
 import Data.Maybe
+import Data.Poly
+import Data.Vector.Generic((!?))
 
 default ()
 
@@ -142,6 +144,20 @@ coloredPartitions1 (lookupMultiplicity -> multiplicityFunc) =
      then multiplicityFunc 1
      else (gamma n + sum [(gamma k) * (recurse (n - k)) | k <- [1..n-1]]) `div` n
     )
+
+-- We assume for now that the polynomial to be inverted has lowest-order term 1
+invertPoly :: (VPoly Integer) -> Integer -> Integer
+invertPoly p =
+  let coeff d = fromMaybe 0 $ (unPoly p) !? (fromIntegral d)
+  in
+    memoFix (\recurse n -> 
+    if n == 0
+    then 1
+    else - sum [(recurse k) * (coeff (n - k)) | k <- [0..n-1]]
+    )
+
+coloredPartitions5 :: [(Integer, Integer)] -> Integer -> Integer
+coloredPartitions5 m = invertPoly $ product [(1 - X^a)^b | (a, b) <- m]
 
 coloredPartitions beta 1 = fromMaybe 0 (lookup 1 beta)
 coloredPartitions beta n = coloredPartitions2 beta n -- Empirically, this is better than coloredPartitions1 or coloredPartitions3

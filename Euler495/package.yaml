@@ -4,6 +4,8 @@ dependencies:
 - base >= 4.7 && < 5
 - containers
 - memoize
+- poly
+- vector
 
 executables:
   Euler495-exe:

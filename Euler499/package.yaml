@@ -1,16 +1,11 @@
-name:                Euler495
+name:                Euler499
 
 dependencies:
 - base >= 4.7 && < 5
-- containers
-- memoize
-- poly
-- vector
-- unboxing-vector
 
 executables:
-  Euler495-exe:
-    main:                Euler495.hs
+  Euler499:
+    main: Euler499.hs
     ghc-options:
     - -threaded
     - -rtsopts

@@ -6,7 +6,10 @@
   FlexibleInstances,
   FlexibleContexts,
   AllowAmbiguousTypes,
-  ScopedTypeVariables
+  ScopedTypeVariables,
+  ConstraintKinds,
+  GeneralizedNewtypeDeriving,
+  UndecidableInstances
   #-}
 
 import Prelude hiding (length, replicate, take, Integer, fromInteger)
@@ -18,6 +21,7 @@ import qualified Data.Map.Strict as Map
 import Data.Maybe
 import Data.Poly
 import qualified Data.Vector.Generic as Vector
+import qualified Data.Vector.Unboxing as Unboxing
 import Control.Monad(when)
 
 default ()
@@ -36,6 +40,9 @@ type Natural = Integer
 type PositiveInteger = Natural
 type Prime = PositiveInteger
 type Fraction = Ratio Natural
+
+type MyPoly = Poly Unboxing.Vector
+type Vectorable = Unboxing.Unboxable
 
 primes = 2 : filter isPrime [3..]
 
@@ -168,7 +175,7 @@ generalExp mult one base = memoFix (\recurse n ->
   )
 
 -- We assume here that modulus is monic (i.e., has highest-degree coefficient one)
-polyMod :: (Eq n, Num n) => (VPoly n) -> (VPoly n) -> (VPoly n)
+polyMod :: (Vectorable n, Eq n, Num n) => (MyPoly n) -> (MyPoly n) -> (MyPoly n)
 polyMod p modulus = case (leading p, leading modulus) of
   (Just (pDegree, pLeadingCoefficient), Just(mDegree, _)) -> 
     if pDegree >= mDegree
@@ -179,20 +186,20 @@ modMultPoly modulus a b = (a * b) `polyMod` modulus
 
 flipPoly = toPoly . (Vector.reverse) . unPoly
 
-coeff :: (Eq n, Num n) => Integer -> VPoly n -> n
+coeff :: (Vectorable n, Eq n, Num n) => Integer -> MyPoly n -> n
 coeff d p = fromMaybe 0 $ (Vector.!?) (unPoly p) (fromIntegral d)
 
 -- We assume for now that the polynomial to be inverted has lowest-order term 1
-invertPoly :: (Eq n, Num n) => (VPoly n) -> Integer -> n
+invertPoly :: (Vectorable n, Eq n, Num n) => (MyPoly n) -> Integer -> n
 invertPoly p n =
   let powersOfX = generalExp (modMultPoly (flipPoly p)) 1 X
       Just (fromIntegral -> pDegree, _) = leading p -- We crash here if p is zero
   in coeff (pDegree - 1) $ powersOfX (n + pDegree - 1)
 
-coloredPartitions5 :: (Eq n, Num n) => [(Integer, Integer)] -> Integer -> n
+coloredPartitions5 :: (Vectorable n, Eq n, Num n) => [(Integer, Integer)] -> Integer -> n
 coloredPartitions5 = (\m -> invertPoly $ product [(1 - X^a)^b | (a, b) <- m])
 
-coloredPartitions :: (Eq n, Num n) => [(Integer, Integer)] -> Integer -> n
+coloredPartitions :: (Vectorable n, Eq n, Num n) => [(Integer, Integer)] -> Integer -> n
 coloredPartitions beta 1 = fromInteger $ fromMaybe 0 (lookup 1 beta)
 coloredPartitions beta n = coloredPartitions5 beta n -- Empirically, coloredPartitions2 is better than coloredPartitions1 or coloredPartitions3. coloredPartitions5 is exponentially better than everything, in theory, and remains blazingly fast in practice.
 -- Test: coloredPartitions [(2, 1), (3, 1), (5, 1), (7, 2)] 1000 = 29727907
@@ -257,7 +264,7 @@ factorialPrimeAndExponentFactorization n = [(p, legendre n p) | p <- takeWhile (
 
 -- We presume all modular values are stored at all times in normalized form.
 -- That is, the integer is always in the range [0, modulus)
-newtype Modular = Modular Integer deriving Show
+newtype Modular = Modular Integer deriving (Show, Unboxing.Unboxable)
 modulus = 1000000007 :: Integer -- Note that this is a prime modulus!
 checkPrimeModulus = isPrime modulus
 toModular a = Modular (a `mod` modulus)
